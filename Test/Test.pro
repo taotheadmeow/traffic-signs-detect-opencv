@@ -13,4 +13,5 @@ LIBS += D:\opencv\build\qt\bin\libopencv_imgproc2413.dll
 LIBS += D:\opencv\build\qt\bin\libopencv_features2d2413.dll
 LIBS += D:\opencv\build\qt\bin\libopencv_calib3d2413.dll
 LIBS += D:\opencv\build\qt\bin\libopencv_objdetect2413.dll
+LIBS += D:\opencv\build\qt\bin\libopencv_gpu2413.dll
 
