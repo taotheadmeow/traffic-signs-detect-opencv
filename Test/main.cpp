@@ -8,7 +8,6 @@
 #include <thread>
 #include <chrono>
 #include <Windows.h>
-#include <mutex>
 #define SIGNS_NUM 5
 
 using namespace std;
@@ -39,35 +38,38 @@ int main(int, char**)
     };
     for(int i = 0; i < SIGNS_NUM; i++){
         if(!classifiers[i].load( xmlFilesName[i] )){
-            cout << "Can't load" << xmlFilesName[i] << "\n";
+            cout << "Can't load\"" << xmlFilesName[i] << "\".\n";
             return 0;
         }
         else{
-            cout << "Loaded " << xmlFilesName[i] << " as " << signs_name[i] << "\n";
+            cout << "Loaded \"" << xmlFilesName[i] << "\" as \"" << signs_name[i] << "\".\n";
         }
     }
 
-    cout << "Looking for default camera...." << "\n";
+    cout << "Looking for default camera..." << "\n";
     VideoCapture cap(0);
     if(!cap.isOpened()){
-        cout << "Camera not founded!";
+        cout << "Camera not founded!\n";
         return -1;
+    }
+    else{
+        cout << "Camera founded!\n";
     }
 
 
     cap.read(MASTER_FRAME);
 
     //start detect
-    cout << "Running..." << "\n";
-    std::thread stopSign(signDetect, cap, classifiers[0], 0);
-    std::thread leftSign(signDetect, cap, classifiers[1], 1);
-    std::thread xJunctionSign(signDetect, cap, classifiers[2], 2);
-    std::thread rightSign(signDetect, cap, classifiers[3], 3);
-    std::thread leftorrightSign(signDetect, cap, classifiers[4], 4);
+    cout << "Starting..." <<  "\n";
+    std::thread detection[SIGNS_NUM];
+    for(int i = 0; i < SIGNS_NUM; i++){
+        detection[i] = std::thread(signDetect, cap, classifiers[i], i);}
+
     LARGE_INTEGER frequency;
     LARGE_INTEGER start;
     LARGE_INTEGER end;
     QueryPerformanceFrequency(&frequency);
+    cout << "Started! Press 'C' to stop.\n";
    for(;;){
        QueryPerformanceCounter(&start);
        cap.read(MASTER_FRAME);
@@ -76,9 +78,10 @@ int main(int, char**)
            {
                  Point p1( rowRois[id][i].x, rowRois[id][i].y);
                  Point p2( rowRois[id][i].x + rowRois[id][i].width, rowRois[id][i].y + rowRois[id][i].height);
+                 rectangle(MASTER_FRAME, p1, cvPoint(p1.x+160, p1.y-10), Scalar (0,0,0), CV_FILLED);
                  rectangle(MASTER_FRAME, p1, p2, Scalar (0,255,0), 2);
-                 putText(MASTER_FRAME, signs_name[id], cvPoint(p1.x, p1.y+10),
-                     CV_FONT_HERSHEY_PLAIN, 0.8, cvScalar(150,150,200), 1, CV_AA);
+                 putText(MASTER_FRAME, signs_name[id], cvPoint(p1.x, p1.y),
+                     CV_FONT_HERSHEY_PLAIN, 0.8, cvScalar(255,255,255), 1, CV_AA);
            }
 
        }
@@ -86,7 +89,7 @@ int main(int, char**)
        double interval = static_cast<double>(end.QuadPart- start.QuadPart) /
                                      frequency.QuadPart;
 
-       rectangle(MASTER_FRAME, cvPoint(20,20), cvPoint(50,10), cvScalar(0,0,0,128), CV_FILLED);
+       rectangle(MASTER_FRAME, cvPoint(20,20), cvPoint(50,10), cvScalar(0,0,0), CV_FILLED);
        putText(MASTER_FRAME, to_string((int) (1.0/interval)), cvPoint(20,20),
                    CV_FONT_HERSHEY_PLAIN, 0.8, cvScalar(255,255,250), 1, CV_AA);
        imshow("Traffic Signs Recognition", (MASTER_FRAME));
@@ -96,12 +99,11 @@ int main(int, char**)
 
 
   }
-       stopSign.join();
-       leftSign.join();
-       xJunctionSign.join();
-       rightSign.join();
-       leftorrightSign.join();
+   for(int i = 0; i < SIGNS_NUM; i++){
+      detection[i].join();
+    }
 
+    cout << "Exiting..." << "\n";
     // the camera will be closed automatically upon exit
     // cap.close();
     return 0;
@@ -115,7 +117,7 @@ void signDetect( VideoCapture cap , CascadeClassifier classifier, int id)
       cap.read(frame);
       cvtColor( frame, frame_gray, CV_BGR2GRAY );
       equalizeHist( frame_gray, frame_gray );
-      classifier.detectMultiScale( frame_gray, rowRois[id], 1.1, 2, 0, Size(35, 35), Size(300, 300));
+      classifier.detectMultiScale( frame_gray, rowRois[id], 1.1, 2, 0, Size(20, 20), Size(300, 300));
       if(!isRun){
           break;
       }
