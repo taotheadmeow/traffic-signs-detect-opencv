@@ -8,49 +8,67 @@
 #include <thread>
 #include <chrono>
 #include <Windows.h>
-#define SIGNS_NUM 5
+
 
 using namespace std;
 using namespace cv;
 
 
-void signDetect(VideoCapture cap , CascadeClassifier classifier, int signColor, int id);
+void signDetect(VideoCapture cap , CascadeClassifier classifier, int id);
 void setLabel(Mat& im, const std::string label, const cv::Point & pt);
 Mat colorSegment(Mat *imBGR, int colorId);
-CascadeClassifier classifiers[SIGNS_NUM];
+inline std::string narrow(std::wstring const& text)
+{
+    std::locale const loc("");
+    wchar_t const* from = text.c_str();
+    std::size_t const len = text.size();
+    std::vector<char> buffer(len + 1);
+    std::use_facet<std::ctype<wchar_t> >(loc).narrow(from, from + len, '_', &buffer[0]);
+    return std::string(&buffer[0], &buffer[len]);
+}
+int SIGNS_NUM = 0;
+std::vector<CascadeClassifier> classifiers;
 Mat MASTER_FRAME;
-std::vector<Rect> rowRois[SIGNS_NUM];
+std::vector<std::vector<Rect>> rawRois;
 bool isRun = true;
+double interval;
 int main(int, char**)
 {
-    cout << "Loading files....\n";
-    String signName[SIGNS_NUM] = {
-        "Stop",
-        "Left Curve",
-        "Right Curve",
-        "4-way Intersection",
-        "Left or Right way only"
-    };
-    String xmlFilesName[SIGNS_NUM] = {
-        "r-stop-SignDetector2.xml",
-        "w-curve-left-SignDetector2.xml",
-        "w-curve-right-SignDetector2.xml",
-        "w-junction-xshape-SignDetector2.xml",
-        "r-leftorright-SignDetector2.xml"
-    };
-    int signColor[SIGNS_NUM] = {
-        0, 1, 1, 1, 2
-    };
-    for(int i = 0; i < SIGNS_NUM; i++){
+    vector<String> signName;
+    vector<String> xmlFilesName;
+    cout << "Loading files...\n";
+    //get list of files in detectors dir
+    WIN32_FIND_DATA search_data;
+
+       memset(&search_data, 0, sizeof(WIN32_FIND_DATA));
+       std::wstring path = L".\\detectors\\*.xml";
+       HANDLE handle = FindFirstFile(path.c_str(), &search_data);
+
+       while(handle != INVALID_HANDLE_VALUE)
+       {
+          xmlFilesName.push_back(".\\detectors\\" + narrow(search_data.cFileName));
+          signName.push_back(narrow(search_data.cFileName).erase(narrow(search_data.cFileName).find_last_of("."), string::npos));
+
+          rawRois.push_back(std::vector<Rect>());
+          classifiers.push_back(CascadeClassifier());
+          if(FindNextFile(handle, &search_data) == FALSE)
+            break;
+       }
+
+       //Close the handle after use or memory/resource leak
+       FindClose(handle);
+     //end file finder
+
+    for(int i = 0; i < xmlFilesName.size(); i++){
         if(!classifiers[i].load( xmlFilesName[i] )){
-            cout << "Can't load\"" << xmlFilesName[i] << "\".\n";
-            return 0;
+            cout << "Can't load \"" << xmlFilesName[i] << "\".\n";
         }
         else{
             cout << "Loaded \"" << xmlFilesName[i] << "\" as \"" << signName[i] << "\".\n";
+            SIGNS_NUM++;
         }
     }
-
+    cout << SIGNS_NUM << " files loaded.\n";
     cout << "Looking for default camera..." << "\n";
     VideoCapture cap(0);
 
@@ -68,21 +86,22 @@ int main(int, char**)
     cout << "Starting..." <<  "\n";
     std::thread detection[SIGNS_NUM];
     for(int i = 0; i < SIGNS_NUM; i++){
-        detection[i] = std::thread(signDetect, cap, classifiers[i], signColor[i], i);}
+        detection[i] = std::thread(signDetect, cap, classifiers[i], i);}
 
     LARGE_INTEGER frequency;
     LARGE_INTEGER start;
     LARGE_INTEGER end;
     QueryPerformanceFrequency(&frequency);
     cout << "Started! Press 'C' to stop.\n";
+
    for(;;){
        QueryPerformanceCounter(&start);
        cap.read(MASTER_FRAME);
        for(int id = 0; id < SIGNS_NUM; id++){
-           for( size_t i = 0; i < rowRois[id].size(); i++ )
+           for( size_t i = 0; i < rawRois[id].size(); i++ )
            {
-                 Point p1( rowRois[id][i].x, rowRois[id][i].y);
-                 Point p2( rowRois[id][i].x + rowRois[id][i].width, rowRois[id][i].y + rowRois[id][i].height);
+                 Point p1( rawRois[id][i].x, rawRois[id][i].y);
+                 Point p2( rawRois[id][i].x + rawRois[id][i].width, rawRois[id][i].y + rawRois[id][i].height);
 
                  rectangle(MASTER_FRAME, p1, p2, Scalar (0,255,0), 2);
                  setLabel(MASTER_FRAME, signName[id], p1);
@@ -90,12 +109,16 @@ int main(int, char**)
 
        }
        QueryPerformanceCounter(&end);
-       double interval = static_cast<double>(end.QuadPart- start.QuadPart) /
+       interval = static_cast<double>(end.QuadPart- start.QuadPart) /
                                      frequency.QuadPart;
-
+       if(interval<0.067){
+            Sleep((0.067-interval)*1000);
+            interval = 0.067;
+       }
        rectangle(MASTER_FRAME, cvPoint(20,20), cvPoint(50,10), cvScalar(0,0,0), CV_FILLED);
        putText(MASTER_FRAME, to_string((int) (1.0/interval)), cvPoint(20,20),
                    CV_FONT_HERSHEY_PLAIN, 0.8, cvScalar(255,255,250), 1, CV_AA);
+
        imshow("Traffic Signs Recognition", MASTER_FRAME);
 
        int c = waitKey(10);
@@ -112,17 +135,21 @@ int main(int, char**)
     // cap.close();
     return 0;
 }
-void signDetect( VideoCapture cap , CascadeClassifier classifier, int signColor, int id)
+void signDetect( VideoCapture cap , CascadeClassifier classifier, int id)
 {
     Mat frame_gray;
     Mat frame;
   //-- Detect
   for(;;){
+      if(interval<0.067){
+           Sleep((0.067-interval)*1000);
+           interval = 0.067;
+      }
       cap.read(frame);
       //frame = colorSegment(&frame, signColor); <- will use if color segment function is done!
       cvtColor( frame, frame_gray, CV_BGR2GRAY );
       equalizeHist( frame_gray, frame_gray );
-      classifier.detectMultiScale( frame_gray, rowRois[id], 1.1, 2, 0, Size(12, 12), Size(300, 300));
+      classifier.detectMultiScale( frame_gray, rawRois[id], 1.1, 2, 0, Size(12, 12), Size(300, 300));
       if(!isRun){
           break;
       }
