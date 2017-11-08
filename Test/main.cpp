@@ -14,9 +14,9 @@ using namespace std;
 using namespace cv;
 
 
-void signDetect(VideoCapture cap , CascadeClassifier classifier, int id);
+void signDetect(VideoCapture cap , CascadeClassifier classifier, int id, int colorId);
 void setLabel(Mat& im, const std::string label, const cv::Point & pt);
-Mat colorSegment(Mat *imBGR, int colorId);
+Mat colorSegment(Mat imBGR, int colorId);
 inline std::string narrow(std::wstring const& text)
 {
     std::locale const loc("");
@@ -26,12 +26,27 @@ inline std::string narrow(std::wstring const& text)
     std::use_facet<std::ctype<wchar_t> >(loc).narrow(from, from + len, '_', &buffer[0]);
     return std::string(&buffer[0], &buffer[len]);
 }
+int colorIden(char firstChar){
+    if(firstChar=='w'){
+        return 1;
+    } else if(firstChar=='b'){
+        return 2;
+    } else if(firstChar=='r'){
+        return 0;
+    }
+    else{
+        return -1;
+    }
+}
 int SIGNS_NUM = 0;
 std::vector<CascadeClassifier> classifiers;
 Mat MASTER_FRAME;
 std::vector<std::vector<Rect>> rawRois;
+std::vector<int> signColor;
 bool isRun = true;
 double interval;
+
+
 int main(int, char**)
 {
     vector<String> signName;
@@ -51,6 +66,7 @@ int main(int, char**)
 
           rawRois.push_back(std::vector<Rect>());
           classifiers.push_back(CascadeClassifier());
+
           if(FindNextFile(handle, &search_data) == FALSE)
             break;
        }
@@ -65,6 +81,7 @@ int main(int, char**)
         }
         else{
             cout << "Loaded \"" << xmlFilesName[i] << "\" as \"" << signName[i] << "\".\n";
+            signColor.push_back(colorIden(signName[i].at(0)));
             SIGNS_NUM++;
         }
     }
@@ -86,7 +103,7 @@ int main(int, char**)
     cout << "Starting..." <<  "\n";
     std::thread detection[SIGNS_NUM];
     for(int i = 0; i < SIGNS_NUM; i++){
-        detection[i] = std::thread(signDetect, cap, classifiers[i], i);}
+        detection[i] = std::thread(signDetect, cap, classifiers[i], i, signColor[i]);}
 
     LARGE_INTEGER frequency;
     LARGE_INTEGER start;
@@ -122,7 +139,10 @@ int main(int, char**)
        imshow("Traffic Signs Recognition", MASTER_FRAME);
 
        int c = waitKey(10);
-       if( (char)c == 'c' ) { isRun = false; break; }
+       if( (char)c == 'c' ){
+           isRun = false;
+           Sleep(100);
+           break; }
 
 
   }
@@ -135,7 +155,7 @@ int main(int, char**)
     // cap.close();
     return 0;
 }
-void signDetect( VideoCapture cap , CascadeClassifier classifier, int id)
+void signDetect( VideoCapture cap , CascadeClassifier classifier, int id, int colorId)
 {
     Mat frame_gray;
     Mat frame;
@@ -146,7 +166,7 @@ void signDetect( VideoCapture cap , CascadeClassifier classifier, int id)
            interval = 0.067;
       }
       cap.read(frame);
-      //frame = colorSegment(&frame, signColor); <- will use if color segment function is done!
+      frame = colorSegment(frame, colorId);
       cvtColor( frame, frame_gray, CV_BGR2GRAY );
       equalizeHist( frame_gray, frame_gray );
       classifier.detectMultiScale( frame_gray, rawRois[id], 1.1, 2, 0, Size(12, 12), Size(300, 300));
@@ -155,22 +175,25 @@ void signDetect( VideoCapture cap , CascadeClassifier classifier, int id)
       }
   }
 }
-Mat colorSegment(Mat *imBGR, int colorId){
+Mat colorSegment(Mat imBGR, int colorId){
     //0 for red; 1 for yellow; 2 for blue
     Mat labIm;
     Mat mask;
     Mat result;
-    cv::cvtColor(*imBGR, labIm, cv::COLOR_BGR2Lab);
-    switch(colorId) {
-        case 0:
-            inRange(labIm, Scalar(10, 8, -22), Scalar(75, 35, 45), mask);
-        case 1:
-            inRange(labIm, Scalar(13, -17, 12), Scalar(75, 18, 58), mask);
-        case 2:
-            inRange(labIm, Scalar(10, -33, 46), Scalar(75, -46, -13), mask);
+    cv::cvtColor(imBGR, labIm, COLOR_BGR2Lab);
+    if(colorId==1){
+        inRange(labIm, cv::Scalar(20, 128-5.308, 128+23.580), cv::Scalar(250, 128+25.871, 128+78.349), mask);
     }
-    //cv::floodFill(mask, Point(0,0), Scalar(255));
-    cv::bitwise_and(*imBGR, *imBGR, result, mask);
+    else if(colorId==2){
+        inRange(labIm, Scalar(25, 128-33, 46), Scalar(75, 128-46, 128-13), mask);
+    }
+    else if(colorId==0){
+        inRange(labIm, Scalar(25, 128+8, 128-22), Scalar(250, 128+35, 128+45), mask);
+    }
+    else{
+        return imBGR;
+    }
+    cv::bitwise_and(imBGR, imBGR, result, mask);
     return result;
 }
 void setLabel(cv::Mat& im, const std::string label, const cv::Point & pt)
